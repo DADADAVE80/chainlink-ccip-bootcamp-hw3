@@ -55,7 +55,7 @@ contract TransferUsdcFromFujiToSep is Script, Helper {
     }
 }
 
-contract RecieveUsdcOnSep is Script, Helper {
+contract DeploySwapTestnetUSDCandCrossChainReceiverOnSep is Script, Helper {
     SwapTestnetUSDC swapTestnetUSDC;
     CrossChainReceiver crossChainReceiver;
     address constant fauceteer = 0x68793eA49297eB75DFB4610B68e076D2A5c7646C;
