@@ -8,6 +8,7 @@ remappings = [
     '@chainlink/local=node_modules/@chainlink/local',
 ]
 solc = '0.8.19'
+evm_version = 'paris'
 
 [rpc_endpoints]
 ethereumSepolia = "${ETHEREUM_SEPOLIA_RPC_URL}"

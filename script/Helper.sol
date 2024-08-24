@@ -155,6 +155,8 @@ contract Helper {
         0x705b364CadE0e515577F2646529e3A417473a155;
 
     // USDC addresses
+    address constant usdcEthereumSepolia =
+        0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
     address constant usdcAvalancheFuji =
         0x5425890298aed601595a70AB815c96711a31Bc65;
     address constant usdcPolygonMumbai =
