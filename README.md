@@ -85,3 +85,6 @@ forge script script/EstimateCCIPReceiveGas.s.sol:TransferUsdcFromFujiToCompOnSep
 --broadcast \
 --sender <PUBLIC_ADDRESS>
 ```
+
+## `ccipReceive` gas consumption
+5190 + 10% = 5709
