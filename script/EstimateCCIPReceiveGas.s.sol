@@ -94,6 +94,7 @@ contract TransferUsdcFromFujiToCompOnSep is Script, Helper {
         address _crossChainReceiver
     ) external {
         vm.startBroadcast();
+        vm.recordLogs(); // Starts recording logs to capture events.
 
         (bool usdcApprSuccess, ) = address(usdcAvalancheFuji).call(
             abi.encodeWithSignature(
@@ -109,8 +110,28 @@ contract TransferUsdcFromFujiToCompOnSep is Script, Helper {
             chainIdEthereumSepolia,
             address(_crossChainReceiver),
             1_000_000,
-            5709 // ccipRecieve estimate gas (5190) +10%
+            50000 // ccipRecieve estimate gas (5190) +10%
         );
+
+        // Fetches recorded logs to check for specific events and their outcomes.
+        VmSafe.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 msgExecutedSignature = keccak256(
+            "MsgExecuted(bool,bytes,uint256)"
+        );
+
+        for (uint i = 0; i < logs.length; ) {
+            if (logs[i].topics[0] == msgExecutedSignature) {
+                (, , uint256 gasUsed) = abi.decode(
+                    logs[i].data,
+                    (bool, bytes, uint256)
+                );
+                console.log(
+                    "Gas used: %d",
+                    gasUsed
+                );
+            }
+            ++i;
+        }
 
         vm.stopBroadcast();
     }

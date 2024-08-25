@@ -6,144 +6,139 @@ import {CCIPLocalSimulatorFork, Register} from "@chainlink/local/src/ccip/CCIPLo
 import {BurnMintERC677Helper, IERC20} from "@chainlink/local/src/ccip/CCIPLocalSimulator.sol";
 import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
 import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
+import {TransferUSDC} from "src/TransferUSDC.sol";
+import {SwapTestnetUSDC} from "src/SwapTestnetUSDC.sol";
+import {CrossChainReceiver} from "src/CrossChainReceiver.sol";
+import "script/Helper.sol";
 
-contract EstimateCCIPReceiveGas is Test {
+contract EstimateCCIPReceiveGas is Test, Helper {
     CCIPLocalSimulatorFork public ccipLocalSimulatorFork;
-    uint256 public sourceFork;
-    uint256 public destinationFork;
-    address public alice;
-    address public bob;
-    IRouterClient public sourceRouter;
-    uint64 public destinationChainSelector;
-    BurnMintERC677Helper public sourceCCIPBnMToken;
-    BurnMintERC677Helper public destinationCCIPBnMToken;
-    IERC20 public sourceLinkToken;
+    TransferUSDC public transferUSDC;
+    SwapTestnetUSDC public swapTestnetUSDC;
+    CrossChainReceiver public crossChainReceiver;
+    uint256 public ethSepoliaFork;
+    uint256 public avaxFujiFork;
+    Register.NetworkDetails ethSepoliaNetworkDetails;
+    Register.NetworkDetails avaxFujiNetworkDetails;
+    address constant tester = 0xFB0c1e0a4deD6DF74E5CAa07924aa3F8272Ad0B8;
+    address constant sepFauceteer = 0x68793eA49297eB75DFB4610B68e076D2A5c7646C;
+    address constant sepCometAddress =
+        0xAec1F48e02Cfb822Be958B68C7957156EB3F0b6e;
 
     function setUp() public {
-        string memory DESTINATION_RPC_URL = vm.envString(
+        string memory ETHEREUM_SEPOLIA_RPC_URL = vm.envString(
             "ETHEREUM_SEPOLIA_RPC_URL"
         );
-        string memory SOURCE_RPC_URL = vm.envString("AVALANCHE_FUJI_RPC_URL");
-        destinationFork = vm.createSelectFork(DESTINATION_RPC_URL);
-        sourceFork = vm.createFork(SOURCE_RPC_URL);
-
-        bob = makeAddr("bob");
-        alice = makeAddr("alice");
+        string memory AVALANCHE_FUJI_RPC_URL = vm.envString(
+            "AVALANCHE_FUJI_RPC_URL"
+        );
+        ethSepoliaFork = vm.createFork(ETHEREUM_SEPOLIA_RPC_URL);
+        avaxFujiFork = vm.createSelectFork(AVALANCHE_FUJI_RPC_URL); // set network to fuji
 
         ccipLocalSimulatorFork = new CCIPLocalSimulatorFork();
         vm.makePersistent(address(ccipLocalSimulatorFork));
 
-        Register.NetworkDetails
-            memory destinationNetworkDetails = ccipLocalSimulatorFork
-                .getNetworkDetails(block.chainid);
-        destinationCCIPBnMToken = BurnMintERC677Helper(
-            destinationNetworkDetails.ccipBnMAddress
+        assertEq(vm.activeFork(), avaxFujiFork); // sanity check
+        // Fetch network details
+        avaxFujiNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(
+            block.chainid
         );
-        destinationChainSelector = destinationNetworkDetails.chainSelector;
+        assertEq(avaxFujiNetworkDetails.chainSelector, 14767482510784806043); // sanity check
 
-        vm.selectFork(sourceFork);
-        Register.NetworkDetails
-            memory sourceNetworkDetails = ccipLocalSimulatorFork
-                .getNetworkDetails(block.chainid);
-        sourceCCIPBnMToken = BurnMintERC677Helper(
-            sourceNetworkDetails.ccipBnMAddress
+        vm.prank(tester);
+        // Deploy TransferUSDC to Avalanche Fuji
+        transferUSDC = new TransferUSDC(
+            routerAvalancheFuji,
+            linkAvalancheFuji,
+            usdcAvalancheFuji
         );
-        sourceLinkToken = IERC20(sourceNetworkDetails.linkAddress);
-        sourceRouter = IRouterClient(sourceNetworkDetails.routerAddress);
-    }
 
-    function prepareScenario()
-        public
-        returns (
-            Client.EVMTokenAmount[] memory tokensToSendDetails,
-            uint256 amountToSend
-        )
-    {
-        vm.selectFork(sourceFork);
-        vm.startPrank(alice);
-        sourceCCIPBnMToken.drip(alice);
+        vm.selectFork(ethSepoliaFork); // switch network to eth sepolia
+        assertEq(vm.activeFork(), ethSepoliaFork); // sanity check
+        // Fetch network details
+        ethSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(
+            block.chainid
+        );
+        assertEq(ethSepoliaNetworkDetails.chainSelector, 16015286601757825753); // sanity check
 
-        amountToSend = 100;
-        sourceCCIPBnMToken.approve(address(sourceRouter), amountToSend);
+        vm.startPrank(tester);
 
-        tokensToSendDetails = new Client.EVMTokenAmount[](1);
-        tokensToSendDetails[0] = Client.EVMTokenAmount({
-            token: address(sourceCCIPBnMToken),
-            amount: amountToSend
-        });
+        // Deploy SwapTestnetUSDC on Sepolia
+        swapTestnetUSDC = new SwapTestnetUSDC(
+            usdcEthereumSepolia,
+            usdcEthereumSepolia,
+            sepFauceteer
+        );
+
+        // Deploy CrossChainReceiver on Sepolia
+        crossChainReceiver = new CrossChainReceiver(
+            routerEthereumSepolia,
+            sepCometAddress,
+            address(swapTestnetUSDC)
+        );
 
         vm.stopPrank();
+
+        vm.selectFork(avaxFujiFork); // switch network to fuji
+        assertEq(vm.activeFork(), avaxFujiFork); // sanity check
+
+        vm.prank(tester);
+        // allow  list eth sepolia as dest chain in TransferUSDC on fuji
+        transferUSDC.allowlistDestinationChain(
+            ethSepoliaNetworkDetails.chainSelector,
+            true
+        );
+
+        // Fund TransferUSDC 3 LINK on fuji
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(transferUSDC), 3 ether);
+
+        vm.prank(tester);
+        // approve TransferUSDC to spend 1 USDC
+        IERC20(usdcAvalancheFuji).approve(address(transferUSDC), 1_000_000);
+
+        vm.selectFork(ethSepoliaFork); // switch network to eth sepolia
+        assertEq(vm.activeFork(), ethSepoliaFork); // sanity check
+
+        vm.prank(tester);
+        // allow  list fuji as source chain in CrossChainReceiver on eth sepolia
+        crossChainReceiver.allowlistSourceChain(
+            avaxFujiNetworkDetails.chainSelector,
+            true
+        );
     }
 
-    function test_transferTokensFromEoaToEoaPayFeesInLink() external {
-        (
-            Client.EVMTokenAmount[] memory tokensToSendDetails,
-            uint256 amountToSend
-        ) = prepareScenario();
-        vm.selectFork(destinationFork);
-        uint256 balanceOfBobBefore = destinationCCIPBnMToken.balanceOf(bob);
+    function test_transferUSDC() public {
+        vm.recordLogs(); // Starts recording logs to capture events.
 
-        vm.selectFork(sourceFork);
-        uint256 balanceOfAliceBefore = sourceCCIPBnMToken.balanceOf(alice);
-        ccipLocalSimulatorFork.requestLinkFromFaucet(alice, 10 ether);
+        vm.selectFork(avaxFujiFork); // switch network to fuji
+        assertEq(vm.activeFork(), avaxFujiFork); // sanity check
 
-        vm.startPrank(alice);
-        Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
-            receiver: abi.encode(bob),
-            data: abi.encode(""),
-            tokenAmounts: tokensToSendDetails,
-            extraArgs: Client._argsToBytes(
-                Client.EVMExtraArgsV1({gasLimit: 0})
-            ),
-            feeToken: address(sourceLinkToken)
-        });
+        vm.prank(tester);
+        transferUSDC.transferUsdc(
+            ethSepoliaNetworkDetails.chainSelector,
+            address(crossChainReceiver),
+            1_000_000,
+            500_000
+        );
 
-        uint256 fees = sourceRouter.getFee(destinationChainSelector, message);
-        sourceLinkToken.approve(address(sourceRouter), fees);
-        sourceRouter.ccipSend(destinationChainSelector, message);
-        vm.stopPrank();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(ethSepoliaFork);
+        assertEq(IERC20(usdcEthereumSepolia).balanceOf(address(crossChainReceiver)), 1_000_000);
 
-        uint256 balanceOfAliceAfter = sourceCCIPBnMToken.balanceOf(alice);
-        assertEq(balanceOfAliceAfter, balanceOfAliceBefore - amountToSend);
+        // Fetches recorded logs to check for specific events and their outcomes.
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 msgExecutedSignature = keccak256(
+            "MsgExecuted(bool,bytes,uint256)"
+        );
 
-        ccipLocalSimulatorFork.switchChainAndRouteMessage(destinationFork);
-        uint256 balanceOfBobAfter = destinationCCIPBnMToken.balanceOf(bob);
-        assertEq(balanceOfBobAfter, balanceOfBobBefore + amountToSend);
-    }
-
-    function test_transferTokensFromEoaToEoaPayFeesInNative() external {
-        (
-            Client.EVMTokenAmount[] memory tokensToSendDetails,
-            uint256 amountToSend
-        ) = prepareScenario();
-        vm.selectFork(destinationFork);
-        uint256 balanceOfBobBefore = destinationCCIPBnMToken.balanceOf(bob);
-
-        vm.selectFork(sourceFork);
-        uint256 balanceOfAliceBefore = sourceCCIPBnMToken.balanceOf(alice);
-
-        vm.startPrank(alice);
-        deal(alice, 5 ether);
-
-        Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
-            receiver: abi.encode(bob),
-            data: abi.encode(""),
-            tokenAmounts: tokensToSendDetails,
-            extraArgs: Client._argsToBytes(
-                Client.EVMExtraArgsV1({gasLimit: 0})
-            ),
-            feeToken: address(0)
-        });
-
-        uint256 fees = sourceRouter.getFee(destinationChainSelector, message);
-        sourceRouter.ccipSend{value: fees}(destinationChainSelector, message);
-        vm.stopPrank();
-
-        uint256 balanceOfAliceAfter = sourceCCIPBnMToken.balanceOf(alice);
-        assertEq(balanceOfAliceAfter, balanceOfAliceBefore - amountToSend);
-
-        ccipLocalSimulatorFork.switchChainAndRouteMessage(destinationFork);
-        uint256 balanceOfBobAfter = destinationCCIPBnMToken.balanceOf(bob);
-        assertEq(balanceOfBobAfter, balanceOfBobBefore + amountToSend);
+        for (uint i = 0; i < logs.length; ) {
+            if (logs[i].topics[0] == msgExecutedSignature) {
+                (, , uint256 gasUsed) = abi.decode(
+                    logs[i].data,
+                    (bool, bytes, uint256)
+                );
+                console.log("Gas used: %d", gasUsed);
+            }
+            ++i;
+        }
     }
 }
